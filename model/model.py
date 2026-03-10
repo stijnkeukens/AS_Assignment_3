@@ -4,6 +4,8 @@ from mesa.space import ContinuousSpace
 from components import Source, Sink, SourceSink, Bridge, Link, Intersection
 import pandas as pd
 from collections import defaultdict
+import networkx as nx
+import numpy as np
 
 
 # ---------------------------------------------------------------
@@ -42,9 +44,6 @@ class BangladeshModel(Model):
         Key: (origin, destination)
         Value: the shortest path (Infra component IDs) from an origin to a destination
 
-        Only straight paths in the Demo are added into the dict;
-        when there is a more complex network layout, the paths need to be managed differently
-
     sources: list
         all sources in the network
 
@@ -57,15 +56,15 @@ class BangladeshModel(Model):
 
     file_name = '../data/processed/network_AS3.csv'
 
-    def __init__(self, seed=None, x_max=500, y_max=500, x_min=0, y_min=0):
-
+    def __init__(self, seed=None, scenario=0, x_max=500, y_max=500, x_min=0, y_min=0):
         self.schedule = BaseScheduler(self)
         self.running = True
-        self.path_ids_dict = defaultdict(lambda: pd.Series())
+        self.path_ids_dict = defaultdict(lambda: pd.Series(dtype=int))
         self.space = None
         self.sources = []
         self.sinks = []
-
+        self.G = nx.DiGraph()  # ADD THIS
+        self.scenario = scenario
         self.generate_model()
 
     def generate_model(self):
@@ -77,35 +76,61 @@ class BangladeshModel(Model):
 
         df = pd.read_csv(self.file_name)
 
-        # a list of names of roads to be generated
-        # TODO You can also read in the road column to generate this list automatically
         roads = list(df["road"].unique())
 
         df_objects_all = []
         for road in roads:
-            # Select all the objects on a particular road in the original order as in the cvs
             df_objects_on_road = df[df['road'] == road]
 
             if not df_objects_on_road.empty:
                 df_objects_all.append(df_objects_on_road)
 
-                """
-                Set the path 
-                1. get the serie of object IDs on a given road in the cvs in the original order
-                2. add the (straight) path to the path_ids_dict
-                3. put the path in reversed order and reindex
-                4. add the path to the path_ids_dict so that the vehicles can drive backwards too
-                """
-                path_ids = df_objects_on_road['id']
-                path_ids.reset_index(inplace=True, drop=True)
-                self.path_ids_dict[path_ids[0], path_ids.iloc[-1]] = path_ids
-                self.path_ids_dict[path_ids[0], None] = path_ids
-                path_ids = path_ids[::-1]
-                path_ids.reset_index(inplace=True, drop=True)
+                # Build straight-line path_ids_dict entries (forward and backward)
+                # Always reset_index to ensure 0-based sequential indexing
+                path_ids = df_objects_on_road['id'].reset_index(drop=True)
                 self.path_ids_dict[path_ids[0], path_ids.iloc[-1]] = path_ids
                 self.path_ids_dict[path_ids[0], None] = path_ids
 
-        # put back to df with selected roads so that min and max and be easily calculated
+                path_ids_rev = path_ids[::-1].reset_index(drop=True)
+                self.path_ids_dict[path_ids_rev[0], path_ids_rev.iloc[-1]] = path_ids_rev
+                self.path_ids_dict[path_ids_rev[0], None] = path_ids_rev
+
+                # Build NetworkX graph edges for this road (bidirectional)
+                ids = df_objects_on_road['id'].tolist()
+                lengths = df_objects_on_road['length'].tolist()
+                for i in range(len(ids) - 1):
+                    weight = lengths[i] if lengths[i] > 0 else 1.0
+                    self.G.add_edge(ids[i], ids[i + 1], weight=weight)
+                    self.G.add_edge(ids[i + 1], ids[i], weight=weight)
+
+        # Store lat/lon for every node
+        df_all = pd.concat(df_objects_all)
+        node_coords = df_all.set_index('id')[['lat', 'lon']].to_dict('index')
+        for node_id, coords in node_coords.items():
+            if node_id in self.G.nodes:
+                self.G.nodes[node_id]['lat'] = coords['lat']
+                self.G.nodes[node_id]['lon'] = coords['lon']
+
+        # Connect intersection/sourcesink nodes across roads that are geographically close
+        threshold_deg = 0.02
+        junction_types = {'intersection', 'sourcesink'}
+        junction_nodes = df_all[df_all['model_type'].isin(junction_types)][['id', 'lat', 'lon', 'road']]
+
+        for _, row1 in junction_nodes.iterrows():
+            for _, row2 in junction_nodes.iterrows():
+                if row1['id'] == row2['id']:
+                    continue
+                if row1['road'] == row2['road']:
+                    continue
+                dist = np.sqrt((row1['lat'] - row2['lat'])**2 + (row1['lon'] - row2['lon'])**2)
+                if dist < threshold_deg:
+                    self.G.add_edge(row1['id'], row2['id'], weight=0)
+                    self.G.add_edge(row2['id'], row1['id'], weight=0)
+
+        print(f"Graph: {self.G.number_of_nodes()} nodes, {self.G.number_of_edges()} edges")
+        print(f"Connected components: {nx.number_weakly_connected_components(self.G)}")
+
+        # put back to df with selected roads so that min and max can be easily calculated
         df = pd.concat(df_objects_all)
         y_min, y_max, x_min, x_max = set_lat_lon_bound(
             df['lat'].min(),
@@ -115,14 +140,11 @@ class BangladeshModel(Model):
             0.05
         )
 
-        # ContinuousSpace from the Mesa package;
-        # not to be confused with the SimpleContinuousModule visualization
         self.space = ContinuousSpace(x_max, y_max, True, x_min, y_min)
 
         for df in df_objects_all:
-            for _, row in df.iterrows():  # index, row in ...
+            for _, row in df.iterrows():
 
-                # create agents according to model_type
                 model_type = row['model_type'].strip()
                 agent = None
 
@@ -159,24 +181,43 @@ class BangladeshModel(Model):
 
     def get_random_route(self, source):
         """
-        pick up a random route given an origin
+        Pick a random sink and return the shortest path from source to sink.
+        Uses path_ids_dict as a cache — only computes via NetworkX if not cached.
+        Retries with different sinks if no path found.
         """
-        while True:
-            # different source and sink
-            sink = self.random.choice(self.sinks)
-            if sink is not source:
-                break
-        return self.path_ids_dict[source, sink]
+        sinks = [s for s in self.sinks if s != source]
+        self.random.shuffle(sinks)
 
-    # TODO
+        for sink in sinks:
+            # Return cached path if available (always reset index to be safe)
+            cached = self.path_ids_dict[source, sink]
+            if len(cached) > 0:
+                return cached.reset_index(drop=True)
+
+            # Compute shortest path via NetworkX and cache it
+            try:
+                node_path = nx.shortest_path(self.G, source, sink, weight='weight')
+                path_series = pd.Series(node_path, dtype=int).reset_index(drop=True)
+                self.path_ids_dict[source, sink] = path_series
+                return path_series
+            except nx.NetworkXNoPath:
+                print(f"WARNING: No path found between {source} and {sink}, trying another sink.")
+                continue
+
+        print(f"WARNING: {source} has no reachable sinks.")
+        return pd.Series(dtype=int)
+
     def get_route(self, source):
-        return self.get_straight_route(source)
+        """
+        Get route for a vehicle — uses random routing via NetworkX shortest path.
+        """
+        return self.get_random_route(source)
 
     def get_straight_route(self, source):
         """
-        pick up a straight route given an origin
+        Pick up a straight route given an origin (to end of road).
         """
-        return self.path_ids_dict[source, None]
+        return self.path_ids_dict[source, None].reset_index(drop=True)
 
     def step(self):
         """

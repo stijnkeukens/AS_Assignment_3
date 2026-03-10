@@ -2,6 +2,13 @@ from mesa import Agent
 from enum import Enum
 
 
+BREAKDOWN_RATES = {
+    0: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.00},
+    1: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.05},
+    2: {'A': 0.00, 'B': 0.00, 'C': 0.05, 'D': 0.10},
+    3: {'A': 0.00, 'B': 0.05, 'C': 0.10, 'D': 0.20},
+    4: {'A': 0.05, 'B': 0.10, 'C': 0.20, 'D': 0.40},
+}
 # ---------------------------------------------------------------
 class Infra(Agent):
     """
@@ -36,34 +43,35 @@ class Infra(Agent):
 
 # ---------------------------------------------------------------
 class Bridge(Infra):
-    """
-    Creates delay time
-
-    Attributes
-    __________
-    condition:
-        condition of the bridge
-
-    delay_time: int
-        the delay (in ticks) caused by this bridge
-    ...
-
-    """
-
     def __init__(self, unique_id, model, length=0,
                  name='Unknown', road_name='Unknown', condition='Unknown'):
         super().__init__(unique_id, model, length, name, road_name)
-
         self.condition = condition
+        self.broken = False
 
-        # TODO
-        self.delay_time = self.random.randrange(0, 10)
-        # print(self.delay_time)
+        scenario = getattr(self.model, 'scenario', 0)
+        rates = BREAKDOWN_RATES.get(scenario, BREAKDOWN_RATES[0])
 
-    # TODO
+        cond = str(self.condition).strip().upper()
+        if cond not in rates:
+            cond = 'A'
+
+        if self.random.random() < rates[cond]:
+            self.broken = True
+
     def get_delay_time(self):
-        return self.delay_time
+        if not self.broken:
+            return self.random.randrange(0, 10)
 
+        length_m = self.length
+        if length_m > 200:
+            return int(self.random.triangular(60, 120, 240))
+        elif length_m > 50:
+            return int(self.random.uniform(45, 90))
+        elif length_m > 10:
+            return int(self.random.uniform(15, 60))
+        else:
+            return int(self.random.uniform(10, 20))
 
 # ---------------------------------------------------------------
 class Link(Infra):
@@ -96,7 +104,6 @@ class Sink(Infra):
 
 
 # ---------------------------------------------------------------
-
 class Source(Infra):
     """
     Source generates vehicles
@@ -136,12 +143,16 @@ class Source(Infra):
             if agent:
                 self.model.schedule.add(agent)
                 agent.set_path()
+                if agent.path_ids is None or len(agent.path_ids) == 0:
+                    print(f"WARNING: {self} has no valid path, removing truck.")
+                    self.model.schedule.remove(agent)
+                    return
                 Source.truck_counter += 1
                 self.vehicle_count += 1
                 self.vehicle_generated_flag = True
                 print(str(self) + " GENERATE " + str(agent))
         except Exception as e:
-            print("Oops!", e.__class__, "occurred.")
+            print("Oops!", e.__class__, e, "occurred.")
 
 
 # ---------------------------------------------------------------
@@ -246,15 +257,10 @@ class Vehicle(Agent):
         if self.state == Vehicle.State.DRIVE:
             self.drive()
 
-        """
-        To print the vehicle trajectory at each step
-        """
         print(self)
 
     def drive(self):
-
         # the distance that vehicle drives in a tick
-        # speed is global now: can change to instance object when individual speed is needed
         distance = Vehicle.speed * Vehicle.step_time
         distance_rest = self.location_offset + distance - self.location.length
 
@@ -269,12 +275,8 @@ class Vehicle(Agent):
         """
         vehicle shall move to the next object with the given distance
         """
-
         self.location_index += 1
 
-        # Guard: check if we've gone past the end of the path.
-        # This can happen if the path doesn't end with a Sink, or due to
-        # floating-point overshoot on the final segment.
         if self.location_index >= len(self.path_ids):
             print(f"WARNING: {self} reached end of path without a Sink. Removing.")
             self.removed_at_step = self.model.schedule.steps
@@ -283,10 +285,20 @@ class Vehicle(Agent):
             return
 
         next_id = self.path_ids[self.location_index]
-        next_infra = self.model.schedule._agents[next_id]  # Access to protected member _agents
+
+        # DEBUG
+        next_infra = self.model.schedule._agents.get(next_id, None)
+        print(
+            f"  -> id={next_id}, type={type(next_infra).__name__ if next_infra else 'NOT FOUND'}, length={getattr(next_infra, 'length', 'N/A')}, distance={distance:.1f}")
+
+        if next_infra is None:
+            print(f"ERROR: Agent {next_id} not found in schedule! Removing vehicle.")
+            self.removed_at_step = self.model.schedule.steps
+            self.location.vehicle_count -= 1
+            self.model.schedule.remove(self)
+            return
 
         if isinstance(next_infra, Sink):
-            # arrive at the sink
             self.arrive_at_next(next_infra, 0)
             self.removed_at_step = self.model.schedule.steps
             self.location.remove(self)
@@ -294,17 +306,16 @@ class Vehicle(Agent):
         elif isinstance(next_infra, Bridge):
             self.waiting_time = next_infra.get_delay_time()
             if self.waiting_time > 0:
-                # arrive at the bridge and wait
                 self.arrive_at_next(next_infra, 0)
                 self.state = Vehicle.State.WAIT
                 return
-            # else, continue driving
 
-        if next_infra.length > distance:
-            # stay on this object:
+        if next_infra.length <= 0:
+            self.arrive_at_next(next_infra, 0)
+            self.drive_to_next(distance)
+        elif next_infra.length > distance:
             self.arrive_at_next(next_infra, distance)
         else:
-            # drive to next object:
             self.drive_to_next(distance - next_infra.length)
 
     def arrive_at_next(self, next_infra, location_offset):
