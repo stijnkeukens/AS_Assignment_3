@@ -1,11 +1,14 @@
 # Example README File
 
-Created by: EPA133a Group xx
+Created by: EPA133a Group 11
 
-|    Name     | Student Number |
-| :---------: | :------------- |
-| Mary White  | 1234567        |
-| David Brown | 7654321        |
+|Group Number|11|
+|:---:|:-------:|
+| Jonathan Vermeulen | 5144434 |
+| Stijn Keukens | 5072700 |
+| Scipio Bruijn | 5868181 |
+| Evi de Kok | 5878179 |
+|Annette Dorresteijn | 5868629 |
 
 ## Introduction
 
