@@ -1,7 +1,7 @@
 from mesa.visualization.ModularVisualization import ModularServer
 from ContinuousSpace.SimpleContinuousModule import SimpleCanvas
 from model import BangladeshModel
-from components import Source, Sink, Bridge, Link, Intersection, Infra
+from components import Source, Sink, Bridge, Link, Intersection, Infra, SourceSink
 
 """
 Run simulation with Visualization 
@@ -12,55 +12,56 @@ Print output at terminal
 # ---------------------------------------------------------------
 def agent_portrayal(agent):
     """
-    Define the animation methode
+    Define the animation method
 
     Only circles and rectangles are possible
     Both can be labelled
     """
 
-    # define shapes
     portrayal = {
-        "Shape": "circle",  # rect | circle
+        "Shape": "circle",
         "Filled": "true",
         "Color": "Khaki",
-        "r": 2
-        # "w": max(agent.population / 100000 * 4, 4),  # for "Shape": "rect"
-        # "h": max(agent.population / 100000 * 4, 4)
+        "r": 2,
+        "Layer": 0
     }
 
-    if isinstance(agent, Source):
-        if agent.vehicle_generated_flag:
-            portrayal["Color"] = "green"
-        else:
-            portrayal["Color"] = "red"
+    if isinstance(agent, SourceSink):
+        portrayal["Color"] = "green" if agent.vehicle_generated_flag else "red"
+        portrayal["r"] = 6
+        portrayal["Layer"] = 3
+
+    elif isinstance(agent, Source):
+        portrayal["Color"] = "green" if agent.vehicle_generated_flag else "red"
+        portrayal["r"] = 6
+        portrayal["Layer"] = 3
 
     elif isinstance(agent, Sink):
-        if agent.vehicle_removed_toggle:
-            portrayal["Color"] = "LightSkyBlue"
-        else:
-            portrayal["Color"] = "LightPink"
-
-    elif isinstance(agent, Link):
-        portrayal["Color"] = "Tan"
+        portrayal["Color"] = "LightSkyBlue" if agent.vehicle_removed_toggle else "LightPink"
+        portrayal["r"] = 6
+        portrayal["Layer"] = 3
 
     elif isinstance(agent, Intersection):
         portrayal["Color"] = "DeepPink"
+        portrayal["r"] = 5
+        portrayal["Layer"] = 2
 
     elif isinstance(agent, Bridge):
-        # Only turn blue when vehicles are actually on the bridge
         if agent.vehicle_count > 0:
             portrayal["Color"] = "dodgerblue"
+            portrayal["r"] = min(agent.vehicle_count * 2 + 2, 6)
         else:
             portrayal["Color"] = "gray"
+            portrayal["r"] = 2
+        portrayal["Layer"] = 1
 
-    if isinstance(agent, (Source, Sink)):
-        portrayal["r"] = 5
-    elif isinstance(agent, Infra):
-        # Only scale up size when vehicles are present; stay small (r=2) otherwise
+    elif isinstance(agent, Link):
+        portrayal["Color"] = "Tan"
         if agent.vehicle_count > 0:
             portrayal["r"] = min(agent.vehicle_count * 2 + 2, 6)
         else:
             portrayal["r"] = 2
+        portrayal["Layer"] = 0
 
     # define text labels
     if isinstance(agent, Infra) and agent.name != "":
@@ -76,8 +77,8 @@ Launch the animation server
 Open a browser tab 
 """
 
-canvas_width = 400
-canvas_height = 400
+canvas_width = 500
+canvas_height = 500
 
 space = SimpleCanvas(agent_portrayal, canvas_width, canvas_height)
 
