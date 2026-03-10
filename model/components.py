@@ -271,6 +271,17 @@ class Vehicle(Agent):
         """
 
         self.location_index += 1
+
+        # Guard: check if we've gone past the end of the path.
+        # This can happen if the path doesn't end with a Sink, or due to
+        # floating-point overshoot on the final segment.
+        if self.location_index >= len(self.path_ids):
+            print(f"WARNING: {self} reached end of path without a Sink. Removing.")
+            self.removed_at_step = self.model.schedule.steps
+            self.location.vehicle_count -= 1
+            self.model.schedule.remove(self)
+            return
+
         next_id = self.path_ids[self.location_index]
         next_infra = self.model.schedule._agents[next_id]  # Access to protected member _agents
 

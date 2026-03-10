@@ -131,46 +131,6 @@ def process_road_network(bridges_path, roads_path, road_name):
 
     return full
 
-def assign_intersections(network: pd.DataFrame):
-
-    network = network.copy()
-
-    network['lat_r'] = network['lat'].round(2)
-    network['lon_r'] = network['lon'].round(2)
-
-    # Keep only one entry per road per rounded coordinate to identify unique intersections
-    one_per_road = network.sort_values('id').drop_duplicates(['road', 'lat_r', 'lon_r'])
-
-    # A coordinate is an intersection if it belongs to more than one unique road
-    mask = one_per_road.groupby(['lat_r', 'lon_r'])['road'].transform('nunique') > 1
-
-    # Mark as intersection if it belongs to multiple roads and is not a bridge
-    intersection_mask = mask & (one_per_road['model_type'] != 'bridge')
-
-    # Get the rounded coordinates of the intersections
-    intersection_points = one_per_road.loc[intersection_mask, ['lat_r', 'lon_r']].drop_duplicates()
-
-    # Merge back to the full network to mark intersections
-    network = network.merge(
-        intersection_points.assign(is_intersection=True),
-        on=['lat_r', 'lon_r'],
-        how='left'
-    )
-
-    # Fill NaN values in 'is_intersection' with False (non-intersections)
-    network['is_intersection'] = network['is_intersection'].fillna(False)
-
-    # Update model_type to 'intersection' for those marked as intersections (but not bridges)
-    network.loc[network['is_intersection'] & (network['model_type'] != 'bridge'), 'model_type'] = 'intersection'
-
-    # For rows marked as intersections, assign the same id to all entries with the same rounded coordinates
-    network.loc[network['is_intersection'], "id"] = (network.loc[network['is_intersection']].groupby(['lat_r', 'lon_r'])['id'].transform('min'))
-
-    # Drop the temporary rounded coordinate columns and the is_intersection column
-    network = network.drop(columns=['lat_r', 'lon_r', 'is_intersection'])
-
-    return network
-
 
 # ------------------------------------------------------------
 # MAIN SCRIPT
@@ -189,8 +149,8 @@ long_roads = road_lengths[road_lengths > 25].index.tolist()
 long_roads = [r for r in long_roads if r.startswith("N")]
 
 # 2. Round coordinates to detect approximate intersections
-roads["lat_round"] = roads["lat"].round(2)
-roads["lon_round"] = roads["lon"].round(2)
+roads["lat_round"] = roads["lat"].round(3)
+roads["lon_round"] = roads["lon"].round(3)
 
 # 3. Get rounded coordinate points of N1 and N2
 n1n2_points = roads[roads["road"].isin(["N1", "N2"])][["lat_round", "lon_round"]].drop_duplicates()
@@ -226,9 +186,6 @@ full_network = pd.concat(all_networks, ignore_index=True)
 
 # 9. Assign unique ids
 full_network["id"] = range(1_000_000, 1_000_000 + len(full_network))
-
-# Assign intersections
-full_network = assign_intersections(full_network)
 
 # 10. Keep only required columns
 full_network = full_network[

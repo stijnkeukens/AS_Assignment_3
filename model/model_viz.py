@@ -47,12 +47,20 @@ def agent_portrayal(agent):
         portrayal["Color"] = "DeepPink"
 
     elif isinstance(agent, Bridge):
-        portrayal["Color"] = "dodgerblue"
+        # Only turn blue when vehicles are actually on the bridge
+        if agent.vehicle_count > 0:
+            portrayal["Color"] = "dodgerblue"
+        else:
+            portrayal["Color"] = "gray"
 
     if isinstance(agent, (Source, Sink)):
         portrayal["r"] = 5
     elif isinstance(agent, Infra):
-        portrayal["r"] = min(max(agent.vehicle_count * 2, 2), 6)
+        # Only scale up size when vehicles are present; stay small (r=2) otherwise
+        if agent.vehicle_count > 0:
+            portrayal["r"] = min(agent.vehicle_count * 2 + 2, 6)
+        else:
+            portrayal["r"] = 2
 
     # define text labels
     if isinstance(agent, Infra) and agent.name != "":
