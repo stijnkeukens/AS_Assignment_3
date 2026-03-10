@@ -19,16 +19,12 @@ def filter_road(bridges: pd.DataFrame, roads: pd.DataFrame, road_name: str):
 
 def prepare_road_links(roads_r: pd.DataFrame):
     roads_r = roads_r.sort_values("chainage").reset_index(drop=True)
-
     roads_r["start_km"] = roads_r["chainage"]
     roads_r["end_km"] = roads_r["chainage"].shift(-1)
-
     roads_r = roads_r[roads_r["road"] == roads_r["road"].shift(-1)].copy()
-
     roads_r["model_type"] = "link"
     roads_r["length"] = roads_r["end_km"] - roads_r["start_km"]
     roads_r["condition"] = pd.NA
-
     return roads_r[
         ["road", "model_type", "name", "lat", "lon", "length", "condition", "start_km", "end_km"]
     ]
@@ -36,16 +32,12 @@ def prepare_road_links(roads_r: pd.DataFrame):
 
 def prepare_bridges(bridges_r: pd.DataFrame):
     bridges_r = bridges_r.copy()
-
     bridges_r["length_km"] = bridges_r["length"] / 1000
     bridges_r["start_km"] = bridges_r["chainage"] - bridges_r["length_km"] / 2
     bridges_r["end_km"] = bridges_r["chainage"] + bridges_r["length_km"] / 2
-
     bridges_r["model_type"] = "bridge"
     bridges_r["length"] = bridges_r["length_km"]
-
     bridges_r = bridges_r.rename(columns={"LRPName": "lrp"})
-
     return bridges_r[
         ["road", "model_type", "name", "lat", "lon", "length", "condition", "start_km", "end_km"]
     ]
@@ -55,7 +47,6 @@ def split_links_at_bridges(roads_r: pd.DataFrame, bridges_r: pd.DataFrame):
     cut_points = sorted(
         set(bridges_r["start_km"].tolist() + bridges_r["end_km"].tolist())
     )
-
     bridge_intervals = [(row.start_km, row.end_km) for _, row in bridges_r.iterrows()]
 
     def inside_bridge(s, e):
@@ -65,20 +56,15 @@ def split_links_at_bridges(roads_r: pd.DataFrame, bridges_r: pd.DataFrame):
         return False
 
     split_links = []
-
     for _, row in roads_r.iterrows():
         s, e = row["start_km"], row["end_km"]
-
         internal_cuts = [x for x in cut_points if s < x < e]
         boundaries = [s] + internal_cuts + [e]
-
         for i in range(len(boundaries) - 1):
             seg_start = boundaries[i]
             seg_end = boundaries[i + 1]
-
             if inside_bridge(seg_start, seg_end):
                 continue
-
             new_row = row.copy()
             new_row["start_km"] = seg_start
             new_row["end_km"] = seg_end
@@ -90,28 +76,60 @@ def split_links_at_bridges(roads_r: pd.DataFrame, bridges_r: pd.DataFrame):
 
 def process_road_network(bridges_path, roads_path, road_name):
     bridges, roads = load_data(bridges_path, roads_path)
-
     bridges_r, roads_r = filter_road(bridges, roads, road_name)
-
     roads_r = prepare_road_links(roads_r)
     bridges_r = prepare_bridges(bridges_r)
     roads_r = split_links_at_bridges(roads_r, bridges_r)
-
     return pd.concat([roads_r, bridges_r], ignore_index=True)
 
 
 def find_junctions(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
     """
     Find all junction points between roads.
-    For each road endpoint that is near another road, record:
-      - An intersection on the endpoint's own road (at the endpoint)
-      - An intersection on the other road (at the closest point)
+    For each junction, add BOTH:
+      - an intersection node (for NetworkX routing)
+      - a sourcesink node (so vehicles can be generated/removed there)
+    at the same location on each road involved.
     """
     roads_pts = raw_roads_selected.copy()
     roads_pts = roads_pts.sort_values(["road", "chainage"]).reset_index(drop=True)
 
-    intersection_rows = []
+    rows = []
     added = set()
+    sosi_counter = [1]  # list so the nested function can modify it
+
+    def add_junction(road, lat, lon, chainage):
+        key = (road, round(lat, 3), round(lon, 3))
+        if key in added:
+            return
+        added.add(key)
+
+        # Intersection node — used by NetworkX for routing
+        rows.append({
+            "road": road,
+            "model_type": "intersection",
+            "name": pd.NA,
+            "lat": lat,
+            "lon": lon,
+            "length": 0.02,
+            "condition": pd.NA,
+            "start_km": chainage,
+            "end_km": chainage
+        })
+
+        # Sourcesink node at same location — vehicles can start/end here
+        rows.append({
+            "road": road,
+            "model_type": "sourcesink",
+            "name": f"SoSi{sosi_counter[0]}",
+            "lat": lat,
+            "lon": lon,
+            "length": 0.001,
+            "condition": pd.NA,
+            "start_km": chainage,
+            "end_km": chainage
+        })
+        sosi_counter[0] += 1
 
     for road in roads_pts["road"].unique():
         road_df = roads_pts[roads_pts["road"] == road].sort_values("chainage")
@@ -124,54 +142,31 @@ def find_junctions(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
             min_dist = dist.min()
 
             if min_dist < threshold_deg:
-                key1 = (road, round(lat, 3), round(lon, 3))
-                if key1 not in added:
-                    intersection_rows.append({
-                        "road": road,
-                        "model_type": "intersection",
-                        "name": pd.NA,
-                        "lat": lat,
-                        "lon": lon,
-                        "length": 0.02,
-                        "condition": pd.NA,
-                        "start_km": endpoint_row["chainage"],
-                        "end_km": endpoint_row["chainage"]
-                    })
-                    added.add(key1)
-
+                # Junction on this road's endpoint
+                add_junction(road, lat, lon, endpoint_row["chainage"])
+                # Junction on closest point of the other road
                 closest_idx = dist.idxmin()
                 closest = other.loc[closest_idx]
-                key2 = (closest["road"], round(closest["lat"], 3), round(closest["lon"], 3))
-                if key2 not in added:
-                    intersection_rows.append({
-                        "road": closest["road"],
-                        "model_type": "intersection",
-                        "name": pd.NA,
-                        "lat": closest["lat"],
-                        "lon": closest["lon"],
-                        "length": 0.02,
-                        "condition": pd.NA,
-                        "start_km": closest["chainage"],
-                        "end_km": closest["chainage"]
-                    })
-                    added.add(key2)
+                add_junction(closest["road"], closest["lat"], closest["lon"], closest["chainage"])
 
-    if not intersection_rows:
-        return pd.DataFrame(columns=["road", "model_type", "name", "lat", "lon", "length", "condition", "start_km", "end_km"])
+    if not rows:
+        return pd.DataFrame(columns=[
+            "road", "model_type", "name", "lat", "lon",
+            "length", "condition", "start_km", "end_km"
+        ])
 
-    return pd.DataFrame(intersection_rows)
+    return pd.DataFrame(rows)
 
 
-def add_sourcesinks_from_raw_roads(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
+def add_sourcesinks_from_raw_roads(raw_roads_selected: pd.DataFrame, threshold_deg=0.02, start_counter=1):
     """
-    Create explicit sourcesink rows from the first and last raw road points.
-    Only add a sourcesink if that endpoint is NOT near any point on another road.
+    Create sourcesink rows at open road endpoints (not connected to any other road).
     """
     roads_pts = raw_roads_selected.copy()
     roads_pts = roads_pts.sort_values(["road", "chainage"]).reset_index(drop=True)
 
     sosi_rows = []
-    sosi_counter = 1
+    sosi_counter = start_counter
 
     for road in roads_pts["road"].unique():
         road_df = roads_pts[roads_pts["road"] == road].sort_values("chainage")
@@ -202,8 +197,7 @@ def finalize_network(network_df: pd.DataFrame):
     """
     Final formatting:
     - remove duplicate rows by road + model_type + rounded lat/lon
-    - sort each road's nodes by chainage, with sourcesinks first at
-      the same chainage so they become the path key in model.py
+    - sort each road's nodes by chainage, sourcesinks first at same chainage
     - convert km to meters
     - assign unique ids
     - keep required columns
@@ -220,8 +214,7 @@ def finalize_network(network_df: pd.DataFrame):
 
     full_network = full_network.drop(columns=["lat_round", "lon_round"])
 
-    # Assign sort priority so sourcesinks appear first, then intersections,
-    # then bridges, then links — when chainage is equal
+    # Sort: sourcesinks first, then intersections, then bridges, then links
     type_order = {"sourcesink": 0, "intersection": 1, "bridge": 2, "link": 3}
     full_network["type_order"] = full_network["model_type"].map(type_order).fillna(3)
 
@@ -231,8 +224,10 @@ def finalize_network(network_df: pd.DataFrame):
 
     full_network = full_network.drop(columns=["type_order"])
 
+    # Convert km to meters
     full_network["length"] = full_network["length"] * 1000
 
+    # Assign unique IDs
     full_network["id"] = range(1_000_000, 1_000_000 + len(full_network))
 
     full_network = full_network[
@@ -275,12 +270,10 @@ roads_to_use = sorted(list(set(roads_to_use + ["N1", "N2"])))
 
 print("Roads included in network:", roads_to_use)
 
-# Keep the selected raw roads for adding intersections and sourcesinks
 raw_roads_selected = roads[roads["road"].isin(roads_to_use)].copy()
 
-# 4. Process roads individually
+# 4. Process each road's bridges and links
 all_networks = []
-
 for road in roads_to_use:
     net = process_road_network(
         data_path / "raw" / "BMMS_overview.xlsx",
@@ -291,22 +284,29 @@ for road in roads_to_use:
 
 base_network = pd.concat(all_networks, ignore_index=True)
 
-# 5. Add intersections (on BOTH roads at each junction) and sourcesinks
-intersection_nodes = find_junctions(raw_roads_selected)
-sourcesink_nodes = add_sourcesinks_from_raw_roads(raw_roads_selected)
+# 5. Add junction nodes (intersection + sourcesink pairs) and open-end sourcesinks
+junction_nodes = find_junctions(raw_roads_selected)
+junction_sosi_count = junction_nodes[junction_nodes["model_type"] == "sourcesink"]["name"].nunique()
 
-print(f"Intersections found: {len(intersection_nodes)}")
-print(f"Sourcesinks found: {len(sourcesink_nodes)}")
+sourcesink_nodes = add_sourcesinks_from_raw_roads(
+    raw_roads_selected,
+    start_counter=junction_sosi_count + 1
+)
+
+print(f"Junction nodes (intersections + sourcesinks): {len(junction_nodes)}")
+print(f"Open-end sourcesinks: {len(sourcesink_nodes)}")
 
 full_network = pd.concat(
-    [base_network, intersection_nodes, sourcesink_nodes],
+    [base_network, junction_nodes, sourcesink_nodes],
     ignore_index=True
 )
 
-# 6. Final formatting
+# 6. Finalize
 full_network = finalize_network(full_network)
 
-# 7. Save csv
-full_network.to_csv(data_path / "processed" / "network_AS3.csv", index=False)
+print(f"\nNetwork summary:")
+print(full_network["model_type"].value_counts().to_string())
 
-print("Network saved to data/processed/network_AS3.csv")
+# 7. Save
+full_network.to_csv(data_path / "processed" / "network_AS3.csv", index=False)
+print("\nNetwork saved to data/processed/network_AS3.csv")
