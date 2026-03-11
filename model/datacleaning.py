@@ -96,7 +96,7 @@ def find_junctions(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
 
     rows = []
     added = set()
-    sosi_counter = [1]  # list so the nested function can modify it
+    sosi_counter = [1]
 
     def add_junction(road, lat, lon, chainage):
         key = (road, round(lat, 3), round(lon, 3))
@@ -104,7 +104,6 @@ def find_junctions(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
             return
         added.add(key)
 
-        # Intersection node — used by NetworkX for routing
         rows.append({
             "road": road,
             "model_type": "intersection",
@@ -117,7 +116,6 @@ def find_junctions(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
             "end_km": chainage
         })
 
-        # Sourcesink node at same location — vehicles can start/end here
         rows.append({
             "road": road,
             "model_type": "sourcesink",
@@ -142,9 +140,7 @@ def find_junctions(raw_roads_selected: pd.DataFrame, threshold_deg=0.02):
             min_dist = dist.min()
 
             if min_dist < threshold_deg:
-                # Junction on this road's endpoint
                 add_junction(road, lat, lon, endpoint_row["chainage"])
-                # Junction on closest point of the other road
                 closest_idx = dist.idxmin()
                 closest = other.loc[closest_idx]
                 add_junction(closest["road"], closest["lat"], closest["lon"], closest["chainage"])
@@ -204,7 +200,6 @@ def finalize_network(network_df: pd.DataFrame):
     """
     full_network = network_df.copy()
 
-    # Round lat/lon for dedup
     full_network["lat_round"] = full_network["lat"].round(4)
     full_network["lon_round"] = full_network["lon"].round(4)
 
@@ -214,7 +209,6 @@ def finalize_network(network_df: pd.DataFrame):
 
     full_network = full_network.drop(columns=["lat_round", "lon_round"])
 
-    # Sort: sourcesinks first, then intersections, then bridges, then links
     type_order = {"sourcesink": 0, "intersection": 1, "bridge": 2, "link": 3}
     full_network["type_order"] = full_network["model_type"].map(type_order).fillna(3)
 
@@ -247,26 +241,41 @@ data_path = Path(__file__).resolve().parents[1] / "data"
 bridges = pd.read_excel(data_path / "raw" / "BMMS_overview.xlsx")
 roads = pd.read_csv(data_path / "raw" / "_roads3.csv")
 
+# Roads that are always included regardless of connectivity
+ROADS_ALWAYS_INCLUDE = {"N1", "N2", "N106"}
+
+# Roads to explicitly exclude even if they pass the connectivity check
+ROADS_EXCLUDE = {"N8"}
+
 # 1. Find all N-roads longer than 25 km
 road_lengths = roads.groupby("road")["chainage"].max()
 long_roads = road_lengths[road_lengths > 25].index.tolist()
 long_roads = [r for r in long_roads if r.startswith("N")]
 
-# 2. Find roads connected to N1/N2 using rounded coordinates
-roads["lat_round"] = roads["lat"].round(2)
-roads["lon_round"] = roads["lon"].round(2)
+# 2. Find roads connected to N1/N2 using endpoint distance threshold
+threshold_deg = 0.02  # ~2 km, same as find_junctions
 
-n1n2_points = roads[roads["road"].isin(["N1", "N2"])][["lat_round", "lon_round"]].drop_duplicates()
+n1n2_points = roads[roads["road"].isin(["N1", "N2"])][["lat", "lon"]]
 
-connected_roads = roads.merge(
-    n1n2_points,
-    on=["lat_round", "lon_round"],
-    how="inner"
-)["road"].unique().tolist()
+connected_roads = []
+for road in long_roads:
+    if road in ROADS_EXCLUDE:
+        continue
+    road_df = roads[roads["road"] == road].sort_values("chainage")
+    endpoints = [road_df.iloc[0], road_df.iloc[-1]]
+    for ep in endpoints:
+        dists = np.sqrt(
+            (n1n2_points["lat"] - ep["lat"])**2 +
+            (n1n2_points["lon"] - ep["lon"])**2
+        )
+        if dists.min() < threshold_deg:
+            connected_roads.append(road)
+            break
 
-# 3. Keep only long connected N-roads + always N1 and N2
-roads_to_use = [r for r in long_roads if r in connected_roads]
-roads_to_use = sorted(list(set(roads_to_use + ["N1", "N2"])))
+# 3. Combine: connected roads + always-include roads, minus excluded roads
+roads_to_use = sorted(list(
+    (set(connected_roads) | ROADS_ALWAYS_INCLUDE) - ROADS_EXCLUDE
+))
 
 print("Roads included in network:", roads_to_use)
 

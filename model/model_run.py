@@ -6,9 +6,9 @@ from components import Source
 # ---------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------
-SCENARIOS = [0, 1, 2, 3, 4]
+SCENARIOS = [0]
 RUNS = 1
-TICKS = 1000         # 5 days * 24 hours * 60 minutes
+TICKS = 7200         # 5 days * 24 hours * 60 minutes
 SEED_BASE = 1234567
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'experiment')
 
@@ -35,9 +35,15 @@ def run_scenario(scenario, run, seed):
     # Collect travel times recorded during the run via model.travel_times
     records = []
     for record in model.travel_times:
-        record['scenario'] = scenario
-        record['run'] = run
-        records.append(record)
+        records.append({
+            'vehicle_id': record['vehicle_id'],
+            'generated_at_step': record['generated_at_step'],
+            'removed_at_step': record['removed_at_step'],
+            'travel_time_min': record['travel_time_min'],
+            'generated_by': record['generated_by'],
+            'scenario': scenario,
+            'run': run
+        })
 
     print(f"    -> {len(records)} vehicles completed in scenario {scenario} run {run}")
     return pd.DataFrame(records)
@@ -69,8 +75,8 @@ def main():
 
     # Print and save summary statistics
     print("\n=== SUMMARY ===")
-    summary = df_all.groupby('scenario')['travel_time_min'].agg(['mean', 'median', 'std', 'count'])
-    summary.columns = ['mean_travel_time', 'median_travel_time', 'std_travel_time', 'vehicle_count']
+    summary = df_all.groupby('scenario')['travel_time_min'].agg(['mean', 'median', 'std', 'count', 'sum'])
+    summary.columns = ['mean_travel_time', 'median_travel_time', 'std_travel_time', 'vehicle_count', 'total_travel_time']
     print(summary.to_string())
     summary.to_csv(os.path.join(OUTPUT_DIR, 'summary.csv'))
     print(f"\nAll results saved to {OUTPUT_DIR}")
