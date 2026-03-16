@@ -6,6 +6,8 @@ import pandas as pd
 from collections import defaultdict
 import networkx as nx
 import numpy as np
+from pathlib import Path
+import os
 
 
 # ---------------------------------------------------------------
@@ -53,8 +55,9 @@ class BangladeshModel(Model):
     """
 
     step_time = 1
-
-    file_name = '../data/processed/network_AS3.csv'
+    path = Path(__file__).resolve().parents[1] / "data" / "processed" / "network_AS3.csv"
+    file_name = os.fspath(path)
+    # file_name = '../data/processed/network_AS3.csv'
 
     def __init__(self, seed=None, scenario=0, x_max=500, y_max=500, x_min=0, y_min=0):
         self.schedule = BaseScheduler(self)
