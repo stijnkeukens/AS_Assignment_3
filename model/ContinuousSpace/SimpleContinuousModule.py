@@ -1,8 +1,11 @@
 from mesa_viz_tornado.ModularVisualization import VisualizationElement
-
+from pathlib import Path
+import os
 
 class SimpleCanvas(VisualizationElement):
-    local_includes = ["ContinuousSpace/simple_continuous_canvas.js"]
+    path = Path(__file__).resolve().parents[1] / "ContinuousSpace" / "simple_continuous_canvas.js"
+    local_includes = [os.fspath(path)]
+    #local_includes = ["ContinuousSpace/simple_continuous_canvas.js"]
 
     def __init__(self, portrayal_method=None, canvas_width=500, canvas_height=500):
         """
