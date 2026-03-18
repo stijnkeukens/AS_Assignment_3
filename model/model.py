@@ -60,6 +60,7 @@ class BangladeshModel(Model):
     # file_name = '../data/processed/network_AS3.csv'
 
     def __init__(self, seed=None, scenario=None, x_max=500, y_max=500, x_min=0, y_min=0):
+        super().__init__(seed=seed)
         self.schedule = BaseScheduler(self)
         self.running = True
         self.path_ids_dict = defaultdict(lambda: pd.Series(dtype=int))

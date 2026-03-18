@@ -3,7 +3,7 @@ import pandas as pd
 from model import BangladeshModel
 from components import Source, Bridge
 
-SINGLE_RUN = True # Set to False to run the scenario experiment
+SINGLE_RUN = False # Set to False to run the scenario experiment
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'experiment')
 
 # ---------------------------------------------------------------
@@ -11,7 +11,7 @@ OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'experiment')
 # ---------------------------------------------------------------
 SCENARIOS = [0, 1, 2, 3, 4]
 SCENARIOS = [2] if SINGLE_RUN else SCENARIOS
-RUNS = 2
+RUNS = 1 if SINGLE_RUN else 10
 TICKS = 7200         # 5 days * 24 hours * 60 minutes
 SEED_BASE = 1234567
 BREAKDOWN_RATES = {

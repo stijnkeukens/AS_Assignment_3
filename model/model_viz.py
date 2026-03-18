@@ -85,7 +85,7 @@ space = SimpleCanvas(agent_portrayal, canvas_width, canvas_height)
 server = ModularServer(BangladeshModel,
                        [space],
                        "Transport Model Demo",
-                       {"seed": 1234567,"scenario": 0})
+                       {"seed": 1234567,"scenario": {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.00}})
 
 # The default port
 server.port = 8521
