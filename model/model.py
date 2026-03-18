@@ -1,11 +1,13 @@
 from mesa import Model
 from mesa.time import BaseScheduler
 from mesa.space import ContinuousSpace
-from components import Source, Sink, SourceSink, Bridge, Link, Intersection
+from components import Source, Sink, SourceSink, Bridge, Link, Intersection, Vehicle
 import pandas as pd
 from collections import defaultdict
 import networkx as nx
 import numpy as np
+from pathlib import Path
+import os
 
 
 # ---------------------------------------------------------------
@@ -53,8 +55,9 @@ class BangladeshModel(Model):
     """
 
     step_time = 1
-
-    file_name = '../data/processed/network_AS3.csv'
+    path = Path(__file__).resolve().parents[1] / "data" / "processed" / "network_AS3.csv"
+    file_name = os.fspath(path)
+    # file_name = '../data/processed/network_AS3.csv'
 
     def __init__(self, seed=None, scenario=0, x_max=500, y_max=500, x_min=0, y_min=0):
         self.schedule = BaseScheduler(self)
@@ -63,8 +66,10 @@ class BangladeshModel(Model):
         self.space = None
         self.sources = []
         self.sinks = []
-        self.G = nx.DiGraph()  # ADD THIS
-        self.scenario = scenario
+        self.G = nx.DiGraph()
+        self.scenario = scenario       # must be set before generate_model()
+        self.travel_times = []         # records completed vehicle trips
+
         self.generate_model()
 
     def generate_model(self):
@@ -189,7 +194,7 @@ class BangladeshModel(Model):
         self.random.shuffle(sinks)
 
         for sink in sinks:
-            # Return cached path if available (always reset index to be safe)
+            # Return cached path if available
             cached = self.path_ids_dict[source, sink]
             if len(cached) > 0:
                 return cached.reset_index(drop=True)

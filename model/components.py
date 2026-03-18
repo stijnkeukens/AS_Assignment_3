@@ -1,14 +1,6 @@
 from mesa import Agent
 from enum import Enum
 
-
-BREAKDOWN_RATES = {
-    0: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.00},
-    1: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.05},
-    2: {'A': 0.00, 'B': 0.00, 'C': 0.05, 'D': 0.10},
-    3: {'A': 0.00, 'B': 0.05, 'C': 0.10, 'D': 0.20},
-    4: {'A': 0.05, 'B': 0.10, 'C': 0.20, 'D': 0.40},
-}
 # ---------------------------------------------------------------
 class Infra(Agent):
     """
@@ -42,7 +34,31 @@ class Infra(Agent):
 
 
 # ---------------------------------------------------------------
+BREAKDOWN_RATES = {
+    0: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.00},
+    1: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.05},
+    2: {'A': 0.00, 'B': 0.00, 'C': 0.05, 'D': 0.10},
+    3: {'A': 0.00, 'B': 0.05, 'C': 0.10, 'D': 0.20},
+    4: {'A': 0.05, 'B': 0.10, 'C': 0.20, 'D': 0.40},
+}
+
+
+# ---------------------------------------------------------------
 class Bridge(Infra):
+    """
+    Creates delay time
+
+    Attributes
+    __________
+    condition:
+        condition of the bridge
+
+    delay_time: int
+        the delay (in ticks) caused by this bridge
+    ...
+
+    """
+
     def __init__(self, unique_id, model, length=0,
                  name='Unknown', road_name='Unknown', condition='Unknown'):
         super().__init__(unique_id, model, length, name, road_name)
@@ -61,7 +77,7 @@ class Bridge(Infra):
 
     def get_delay_time(self):
         if not self.broken:
-            return self.random.randrange(0, 10)
+            return 0
 
         length_m = self.length
         if length_m > 200:
@@ -72,6 +88,7 @@ class Bridge(Infra):
             return int(self.random.uniform(15, 60))
         else:
             return int(self.random.uniform(10, 20))
+
 
 # ---------------------------------------------------------------
 class Link(Infra):
@@ -98,9 +115,18 @@ class Sink(Infra):
     vehicle_removed_toggle = False
 
     def remove(self, vehicle):
+        vehicle.removed_at_step = self.model.schedule.steps
+        # Record travel time before removing from schedule
+        self.model.travel_times.append({
+            'vehicle_id': str(vehicle.unique_id),
+            'generated_at_step': vehicle.generated_at_step,
+            'removed_at_step': vehicle.removed_at_step,
+            'travel_time_min': vehicle.removed_at_step - vehicle.generated_at_step,
+            'generated_by': str(vehicle.generated_by),
+        })
         self.model.schedule.remove(vehicle)
         self.vehicle_removed_toggle = not self.vehicle_removed_toggle
-        print(str(self) + ' REMOVE ' + str(vehicle))
+        # print(str(self) + ' REMOVE ' + str(vehicle))
 
 
 # ---------------------------------------------------------------
@@ -150,7 +176,7 @@ class Source(Infra):
                 Source.truck_counter += 1
                 self.vehicle_count += 1
                 self.vehicle_generated_flag = True
-                print(str(self) + " GENERATE " + str(agent))
+                # print(str(self) + " GENERATE " + str(agent))
         except Exception as e:
             print("Oops!", e.__class__, e, "occurred.")
 
@@ -257,7 +283,7 @@ class Vehicle(Agent):
         if self.state == Vehicle.State.DRIVE:
             self.drive()
 
-        print(self)
+        # print(self)
 
     def drive(self):
         # the distance that vehicle drives in a tick
@@ -265,10 +291,8 @@ class Vehicle(Agent):
         distance_rest = self.location_offset + distance - self.location.length
 
         if distance_rest > 0:
-            # go to the next object
             self.drive_to_next(distance_rest)
         else:
-            # remain on the same object
             self.location_offset += distance
 
     def drive_to_next(self, distance):
@@ -285,11 +309,7 @@ class Vehicle(Agent):
             return
 
         next_id = self.path_ids[self.location_index]
-
-        # DEBUG
         next_infra = self.model.schedule._agents.get(next_id, None)
-        print(
-            f"  -> id={next_id}, type={type(next_infra).__name__ if next_infra else 'NOT FOUND'}, length={getattr(next_infra, 'length', 'N/A')}, distance={distance:.1f}")
 
         if next_infra is None:
             print(f"ERROR: Agent {next_id} not found in schedule! Removing vehicle.")
@@ -300,9 +320,13 @@ class Vehicle(Agent):
 
         if isinstance(next_infra, Sink):
             self.arrive_at_next(next_infra, 0)
-            self.removed_at_step = self.model.schedule.steps
-            self.location.remove(self)
-            return
+
+            # Check if the sink is the final destination
+            if self.location_index == len(self.path_ids) - 1:
+                self.removed_at_step = self.model.schedule.steps
+                self.location.remove(self)
+                return
+
         elif isinstance(next_infra, Bridge):
             self.waiting_time = next_infra.get_delay_time()
             if self.waiting_time > 0:
@@ -310,6 +334,7 @@ class Vehicle(Agent):
                 self.state = Vehicle.State.WAIT
                 return
 
+        # Move through zero-length nodes (cross-road intersection edges)
         if next_infra.length <= 0:
             self.arrive_at_next(next_infra, 0)
             self.drive_to_next(distance)
