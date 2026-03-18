@@ -32,17 +32,6 @@ class Infra(Agent):
     def __str__(self):
         return type(self).__name__ + str(self.unique_id)
 
-
-# ---------------------------------------------------------------
-BREAKDOWN_RATES = {
-    0: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.00},
-    1: {'A': 0.00, 'B': 0.00, 'C': 0.00, 'D': 0.05},
-    2: {'A': 0.00, 'B': 0.00, 'C': 0.05, 'D': 0.10},
-    3: {'A': 0.00, 'B': 0.05, 'C': 0.10, 'D': 0.20},
-    4: {'A': 0.05, 'B': 0.10, 'C': 0.20, 'D': 0.40},
-}
-
-
 # ---------------------------------------------------------------
 class Bridge(Infra):
     """
@@ -60,34 +49,50 @@ class Bridge(Infra):
     """
 
     def __init__(self, unique_id, model, length=0,
-                 name='Unknown', road_name='Unknown', condition='Unknown'):
+                 name='Unknown', road_name='Unknown', condition='Unknown', lat=0, lon=0):
         super().__init__(unique_id, model, length, name, road_name)
         self.condition = condition
-        self.broken = False
+        self.lat = lat
+        self.lon = lon
 
-        scenario = getattr(self.model, 'scenario', 0)
-        rates = BREAKDOWN_RATES.get(scenario, BREAKDOWN_RATES[0])
+        self.broken = self.set_broken(self.model.scenario)
 
+    def set_broken(self, rates):
+        """
+        Determine if the bridge is broken based on its condition and the corresponding probabilities
+        """
+        broken = False
         cond = str(self.condition).strip().upper()
-        if cond not in rates:
-            cond = 'A'
+        if cond in rates:
+            rate = rates[cond]
+            broken = self.model.random.random() < rate
+        
+        return broken
 
-        if self.random.random() < rates[cond]:
-            self.broken = True
 
     def get_delay_time(self):
+        """
+        Get the delay time caused by this bridge if it is broken on its condition and length
+        """
         if not self.broken:
-            return 0
+            self.delay_time = 0
+            return self.delay_time
+        
+        if self.broken:
+            if self.length < 10:
+                # delay time between 10 and 20 minutes for short bridges
+                self.delay_time = self.model.random.uniform(10,20)
+            elif self.length < 50:
+                # delay time between 15 and 60 minutes for long bridges
+                self.delay_time = self.model.random.uniform(15,60)
+            elif self.length < 200:
+                # delay time between 45 and 90 minutes for very long bridges
+                self.delay_time = self.model.random.uniform(45,90)
+            else:
+                # delay time between 1 and 4 hours for extremely long bridges
+                self.delay_time = self.model.random.triangular(60, 120, 240)
 
-        length_m = self.length
-        if length_m > 200:
-            return int(self.random.triangular(60, 120, 240))
-        elif length_m > 50:
-            return int(self.random.uniform(45, 90))
-        elif length_m > 10:
-            return int(self.random.uniform(15, 60))
-        else:
-            return int(self.random.uniform(10, 20))
+        return self.delay_time
 
 
 # ---------------------------------------------------------------
@@ -122,6 +127,7 @@ class Sink(Infra):
             'generated_at_step': vehicle.generated_at_step,
             'removed_at_step': vehicle.removed_at_step,
             'travel_time_min': vehicle.removed_at_step - vehicle.generated_at_step,
+            'total_delay_time_min': vehicle.delay_time,
             'generated_by': str(vehicle.generated_by),
         })
         self.model.schedule.remove(vehicle)
@@ -230,7 +236,6 @@ class Vehicle(Agent):
     removed_at_step: int
         the timestamp (number of ticks) that the vehicle is removed
     ...
-
     """
 
     # 48 km/h translated into meter per min
@@ -255,6 +260,7 @@ class Vehicle(Agent):
         self.state = Vehicle.State.DRIVE
         self.location_index = 0
         self.waiting_time = 0
+        self.delay_time = 0
         self.waited_at = None
         self.removed_at_step = None
 
@@ -328,8 +334,36 @@ class Vehicle(Agent):
                 return
 
         elif isinstance(next_infra, Bridge):
-            self.waiting_time = next_infra.get_delay_time()
+            alternative_bridges = [next_infra]
+
+            while self.location_index + 1 < len(self.path_ids):
+                next_infra_neighbor = self.model.schedule._agents[self.path_ids[self.location_index + 1]]
+
+                if isinstance(next_infra_neighbor, Bridge) and self.bridges_are_interchangeable(next_infra, next_infra_neighbor):
+                    alternative_bridges.append(next_infra_neighbor)
+                    self.location_index += 1
+                    next_infra = next_infra_neighbor
+                else:
+                    break
+            
+            best_bridge = alternative_bridges[0]
+            best_delay = best_bridge.get_delay_time()
+            best_time = best_delay + (best_bridge.length / Vehicle.speed * Vehicle.step_time)
+
+            for bridge in alternative_bridges[1:]:
+                delay = bridge.get_delay_time()
+                time = delay + (bridge.length / Vehicle.speed * Vehicle.step_time)
+
+                if time < best_time:
+                    best_bridge = bridge
+                    best_delay = delay
+                    best_time = time
+
+            self.waiting_time = best_delay
+            next_infra = best_bridge
+
             if self.waiting_time > 0:
+                self.delay_time += self.waiting_time
                 self.arrive_at_next(next_infra, 0)
                 self.state = Vehicle.State.WAIT
                 return
@@ -351,5 +385,15 @@ class Vehicle(Agent):
         self.location = next_infra
         self.location_offset = location_offset
         self.location.vehicle_count += 1
+
+    def bridges_are_interchangeable(self, bridge1, bridge2, tolerance=0.00005):
+        """
+        Check if two bridges are interchangeable for the vehicle, 
+        which means they are appriximately at the same location 
+        and thus both go to the same destination point.
+        """
+        bridge_lat_diff = abs(bridge1.lat - bridge2.lat)
+        bridge_lon_diff = abs(bridge1.lon - bridge2.lon)
+        return bridge_lat_diff < tolerance and bridge_lon_diff < tolerance
 
 # EOF -----------------------------------------------------------

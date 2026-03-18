@@ -59,7 +59,7 @@ class BangladeshModel(Model):
     file_name = os.fspath(path)
     # file_name = '../data/processed/network_AS3.csv'
 
-    def __init__(self, seed=None, scenario=0, x_max=500, y_max=500, x_min=0, y_min=0):
+    def __init__(self, seed=None, scenario=None, x_max=500, y_max=500, x_min=0, y_min=0):
         self.schedule = BaseScheduler(self)
         self.running = True
         self.path_ids_dict = defaultdict(lambda: pd.Series(dtype=int))
@@ -170,7 +170,7 @@ class BangladeshModel(Model):
                     self.sources.append(agent.unique_id)
                     self.sinks.append(agent.unique_id)
                 elif model_type == 'bridge':
-                    agent = Bridge(row['id'], self, row['length'], name, row['road'], row['condition'])
+                    agent = Bridge(row['id'], self, row['length'], name, row['road'], row['condition'], row['lat'], row['lon'])
                 elif model_type == 'link':
                     agent = Link(row['id'], self, row['length'], name, row['road'])
                 elif model_type == 'intersection':
