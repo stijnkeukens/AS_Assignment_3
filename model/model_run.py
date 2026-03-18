@@ -6,8 +6,8 @@ from components import Source
 # ---------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------
-SCENARIOS = [0]
-RUNS = 1
+SCENARIOS = [0, 1, 2, 3, 4]
+RUNS = 10
 TICKS = 7200         # 5 days * 24 hours * 60 minutes
 SEED_BASE = 1234567
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'experiment')
@@ -57,7 +57,8 @@ def main():
         scenario_results = []
 
         for run in range(RUNS):
-            seed = SEED_BASE + scenario * 100 + run
+            # seed = SEED_BASE + scenario * 100 + run
+            seed = SEED_BASE + run
             df_run = run_scenario(scenario, run, seed)
             scenario_results.append(df_run)
 

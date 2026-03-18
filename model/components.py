@@ -1,7 +1,6 @@
 from mesa import Agent
 from enum import Enum
 
-
 # ---------------------------------------------------------------
 class Infra(Agent):
     """
@@ -127,7 +126,7 @@ class Sink(Infra):
         })
         self.model.schedule.remove(vehicle)
         self.vehicle_removed_toggle = not self.vehicle_removed_toggle
-        print(str(self) + ' REMOVE ' + str(vehicle))
+        # print(str(self) + ' REMOVE ' + str(vehicle))
 
 
 # ---------------------------------------------------------------
@@ -177,7 +176,7 @@ class Source(Infra):
                 Source.truck_counter += 1
                 self.vehicle_count += 1
                 self.vehicle_generated_flag = True
-                print(str(self) + " GENERATE " + str(agent))
+                # print(str(self) + " GENERATE " + str(agent))
         except Exception as e:
             print("Oops!", e.__class__, e, "occurred.")
 
@@ -284,7 +283,7 @@ class Vehicle(Agent):
         if self.state == Vehicle.State.DRIVE:
             self.drive()
 
-        print(self)
+        # print(self)
 
     def drive(self):
         # the distance that vehicle drives in a tick
@@ -321,9 +320,13 @@ class Vehicle(Agent):
 
         if isinstance(next_infra, Sink):
             self.arrive_at_next(next_infra, 0)
-            self.removed_at_step = self.model.schedule.steps
-            self.location.remove(self)
-            return
+
+            # Check if the sink is the final destination
+            if self.location_index == len(self.path_ids) - 1:
+                self.removed_at_step = self.model.schedule.steps
+                self.location.remove(self)
+                return
+
         elif isinstance(next_infra, Bridge):
             self.waiting_time = next_infra.get_delay_time()
             if self.waiting_time > 0:
