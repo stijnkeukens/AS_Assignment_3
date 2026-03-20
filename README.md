@@ -53,9 +53,9 @@ EPA133a-G11-A2/
 |    ├─ intersections.csv                 # Demo files for testing
 |    └─ network_AS3.csv                   # Output of components_cleaning.py to use for further modelling
 ├─ experiment/
-|  ├─ all_scenarios.csv                   #
-|  ├─ run_metrics.csv
-|  ├─ scenarioX.csv                       # Experimental output files of all scenarios separately
+|  ├─ all_scenarios.csv                   # overview of metrics per scenario run per truck
+|  ├─ run_metrics.csv                     # overview of metrics per scenario run
+|  ├─ scenarioX.csv                       # Experimental output files of all scenarios (0-4) separately
 |  └─ summary.csv                         # Overview of metrics per scenario
 ├─ img/
 |  ├─ experiments_viz/                    # This file includes all experimental visualizations for the report
