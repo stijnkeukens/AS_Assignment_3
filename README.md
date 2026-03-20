@@ -76,6 +76,8 @@ EPA133a-G11-A2/
 |  └─ model_viz.py  
 ├─ notebook/
 |  └─ results.ipynb                       # Here the results plots 
+├─ report/
+|  └─ EPA133a_G11-A3                      # Report
 ├─ requirements.txt                       # Python dependencies
 └─ README.md                              # Project documentation
 ```
