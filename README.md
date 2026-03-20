@@ -11,7 +11,7 @@ Created by: EPA133a Group 11
 |Annette Dorresteijn | 5868629 |
 
 ## Introduction
-
+This project simulates goods transport across Bangladesh's N1 and N2 highway networks using Mesa 2.1.4 and NetworkX. By modeling bridges as failure-prone infrastructure, the simulation analyzes how varying degradation scenarios (Categories A–D) impact travel times and network reliability. The model automatically generates a routable network from real-world road data, utilizing shortest-path caching to efficiently simulate five-day transport windows.
 
 
 ## How to Use
@@ -31,10 +31,11 @@ Run the model from `model/model_run.py` (from the project root):
 python model/model_run.py
 ```
 
-- Set `SINGLE_RUN = True` to run one simulation.
-- Output is printed saved to `experiment/model_results.csv`.
-- Set `SINGLE_RUN = False` to run the full scenario analysis (Scenarios 0-8, 10 replications each).
-- Output is saved to `experiment/scenario0.csv` through `scenario8.csv`.
+- Set `SINGLE_RUN = True` to run one simulation (scenario 2).
+- Output is printed saved to `experiment/scenario2.csv`.
+- Set `SINGLE_RUN = False` to run the full scenario analysis (Scenarios 0-4, 10 replications each).
+- Output is saved to `experiment/scenario0.csv` through `scenario4.csv`.
+- Aggregated data is saved to `all_scenarios.csv`, `run_metrics.csv` and `summary.csv`.
 
 To visualize the model, run `model/model_viz.py`.
 This runs a single simulation with adjustable bridge breakdown probabilities.
