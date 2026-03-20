@@ -75,8 +75,7 @@ EPA133a-G11-A2/
 |  ├─ model_run.py                        
 |  └─ model_viz.py  
 ├─ notebook/
-|  ├─ results.ipynb                       # Here the results plots are generated
-|  └─ test.ipynb                          # Here data cleaning is tested
+|  └─ results.ipynb                       # Here the results plots 
 ├─ requirements.txt                       # Python dependencies
 └─ README.md                              # Project documentation
 ```
